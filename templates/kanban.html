@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TMS - 工单看板</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f0f2f5;
+    --card-bg: #fff;
+    --border: #e0e0e0;
+    --text: #1a1a2e;
+    --text-muted: #666;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --open-color: #6366f1;
+    --in-progress-color: #f59e0b;
+    --review-color: #8b5cf6;
+    --done-color: #10b981;
+    --closed-color: #9ca3af;
+    --critical: #ef4444;
+    --high: #f97316;
+    --medium: #3b82f6;
+    --low: #22c55e;
+    --shadow: 0 1px 3px rgba(0,0,0,.1);
+    --radius: 8px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  .app-header { background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .app-header h1 { font-size: 20px; font-weight: 600; }
+  .app-header .nav { display: flex; gap: 8px; }
+  .app-header .nav a { color: #fff; text-decoration: none; padding: 6px 14px; border-radius: 6px; font-size: 13px; background: rgba(255,255,255,.15); transition: .2s; cursor: pointer; }
+  .app-header .nav a:hover { background: rgba(255,255,255,.25); }
+  .app-header .nav a.active { background: rgba(255,255,255,.3); font-weight: 600; }
+
+  .container { max-width: 1440px; margin: 0 auto; padding: 16px; }
+
+  /* 工具栏 */
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center; }
+  .toolbar input, .toolbar select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; background: #fff; }
+  .toolbar input { flex: 1; min-width: 180px; }
+  .btn { padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; transition: .2s; font-weight: 500; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-success { background: #10b981; color: #fff; }
+
+  /* 看板列 */
+  .kanban { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
+  @media (max-width: 1000px) { .kanban { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 600px) { .kanban { grid-template-columns: 1fr; } }
+  .kanban-col { background: #f8f9fa; border-radius: var(--radius); padding: 8px; min-height: 200px; }
+  .kanban-col-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 8px 12px; font-weight: 600; font-size: 14px; border-bottom: 2px solid var(--border); margin-bottom: 8px; }
+  .kanban-col-header .count { background: var(--border); padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+
+  /* 工单卡片 */
+  .ticket-card { background: var(--card-bg); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; box-shadow: var(--shadow); cursor: grab; transition: .15s; border-left: 3px solid var(--medium); }
+  .ticket-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.15); transform: translateY(-1px); }
+  .ticket-card.critical { border-left-color: var(--critical); }
+  .ticket-card.high { border-left-color: var(--high); }
+  .ticket-card.medium { border-left-color: var(--medium); }
+  .ticket-card.low { border-left-color: var(--low); }
+  .ticket-card .tkt-title { font-weight: 500; font-size: 13px; margin-bottom: 4px; }
+  .ticket-card .tkt-meta { font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between; }
+  .ticket-card .tkt-id { font-size: 11px; color: var(--text-muted); }
+  .ticket-card .priority-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; color: #fff; }
+  .priority-badge.critical { background: var(--critical); }
+  .priority-badge.high { background: var(--high); }
+  .priority-badge.medium { background: var(--medium); }
+  .priority-badge.low { background: var(--low); }
+
+  /* 图表区域 */
+  .charts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+  @media (max-width: 800px) { .charts { grid-template-columns: 1fr; } }
+  .chart-box { background: var(--card-bg); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
+  .chart-box h3 { font-size: 14px; margin-bottom: 8px; color: var(--text-muted); }
+  .chart-box canvas { max-height: 220px; }
+
+  /* 模态框 */
+  .modal-overlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,.4); z-index: 1000; align-items: center; justify-content: center; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: #fff; border-radius: 12px; padding: 24px; width: 90%; max-width: 500px; max-height: 80vh; overflow-y: auto; }
+  .modal h2 { margin-bottom: 16px; }
+  .modal label { display: block; font-size: 13px; font-weight: 500; margin-top: 10px; margin-bottom: 4px; }
+  .modal input, .modal textarea, .modal select { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+  .modal textarea { min-height: 60px; resize: vertical; }
+  .modal .form-row { display: flex; gap: 10px; }
+  .modal .form-row > * { flex: 1; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); }
+  .btn-ghost:hover { background: #f0f0f0; }
+
+  /* 详情弹窗 */
+  .detail-section { margin-bottom: 12px; }
+  .detail-section label { font-weight: 600; font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 2px; }
+  .detail-section .value { font-size: 14px; }
+  .comment-item { border-bottom: 1px solid var(--border); padding: 8px 0; }
+  .comment-item .meta { font-size: 11px; color: var(--text-muted); }
+  .comment-item .body { font-size: 13px; margin-top: 2px; }
+
+  .toast { position: fixed; bottom: 24px; right: 24px; background: #333; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 13px; opacity: 0; transition: .3s; z-index: 2000; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="app-header">
+  <h1>TMS — 工单看板</h1>
+  <div class="nav">
+    <a class="active" onclick="showTab('kanban')">看板</a>
+    <a onclick="showTab('charts')">统计</a>
+    <a onclick="openCreateModal()">+ 新建工单</a>
+  </div>
+</div>
+
+<div class="container">
+  <!-- 工具栏 -->
+  <div class="toolbar">
+    <input type="text" id="searchInput" placeholder="搜索标题/描述..." oninput="filterTickets()">
+    <select id="statusFilter" onchange="filterTickets()">
+      <option value="">全部状态</option>
+      <option value="open">待处理</option>
+      <option value="in_progress">进行中</option>
+      <option value="review">评审中</option>
+      <option value="done">已完成</option>
+      <option value="closed">已关闭</option>
+    </select>
+    <select id="priorityFilter" onchange="filterTickets()">
+      <option value="">全部优先级</option>
+      <option value="critical">Critical</option>
+      <option value="high">High</option>
+      <option value="medium">Medium</option>
+      <option value="low">Low</option>
+    </select>
+    <button class="btn btn-primary" onclick="openCreateModal()">+ 新建工单</button>
+  </div>
+
+  <!-- 看板视图 -->
+  <div id="kanbanView">
+    <div class="kanban" id="kanbanBoard"></div>
+  </div>
+
+  <!-- 统计视图 -->
+  <div id="chartsView" style="display:none;">
+    <div class="charts">
+      <div class="chart-box"><h3>状态分布</h3><canvas id="statusChart"></canvas></div>
+      <div class="chart-box"><h3>优先级分布</h3><canvas id="priorityChart"></canvas></div>
+      <div class="chart-box"><h3>每人任务数</h3><canvas id="assigneeChart"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- 新建工单弹窗 -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <h2>新建工单</h2>
+    <label>标题 *</label><input id="newTitle" placeholder="输入工单标题">
+    <label>描述</label><textarea id="newDesc" placeholder="详细描述..."></textarea>
+    <div class="form-row">
+      <div><label>优先级</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="critical">Critical</option></select></div>
+      <div><label>负责人</label><input id="newAssignee" placeholder="姓名"></div>
+    </div>
+    <div class="form-row">
+      <div><label>标签</label><input id="newTags" placeholder="bug,前端"></div>
+      <div><label>截止日期</label><input id="newDueDate" type="date"></div>
+    </div>
+    <label>预估工时 (小时)</label><input id="newHours" type="number" step="0.5" placeholder="可选">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('createModal')">取消</button>
+      <button class="btn btn-primary" onclick="createTicket()">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- 工单详情弹窗 -->
+<div class="modal-overlay" id="detailModal">
+  <div class="modal">
+    <h2 id="detailTitle">工单详情</h2>
+    <div id="detailContent"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('detailModal')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ======== 数据 ========
+let allTickets = [];
+let statusChartInstance = null;
+let priorityChartInstance = null;
+let assigneeChartInstance = null;
+
+const STATUS_LABELS = { open: '待处理', in_progress: '进行中', review: '评审中', done: '已完成', closed: '已关闭' };
+const STATUS_ORDER = ['open', 'in_progress', 'review', 'done', 'closed'];
+const PRIORITY_ORDER = ['critical', 'high', 'medium', 'low'];
+const COLORS = { open: '#6366f1', in_progress: '#f59e0b', review: '#8b5cf6', done: '#10b981', closed: '#9ca3af' };
+
+// ======== 初始化 ========
+async function loadTickets() {
+  try {
+    const r = await fetch('/api/tickets?page_size=200');
+    const data = await r.json();
+    allTickets = data.tickets || [];
+    renderBoard();
+    renderCharts();
+  } catch (e) {
+    showToast('加载失败: ' + e.message);
+  }
+}
+
+// ======== 看板渲染 ========
+function renderBoard() {
+  const board = { open: [], in_progress: [], review: [], done: [], closed: [] };
+  allTickets.forEach(t => {
+    const col = board[t.status] ? t.status : 'open';
+    board[col].push(t);
+  });
+
+  const container = document.getElementById('kanbanBoard');
+  container.innerHTML = '';
+
+  STATUS_ORDER.forEach(status => {
+    const col = document.createElement('div');
+    col.className = 'kanban-col';
+    col.dataset.status = status;
+
+    const header = document.createElement('div');
+    header.className = 'kanban-col-header';
+    header.innerHTML = `<span>${STATUS_LABELS[status]}</span><span class="count">${board[status].length}</span>`;
+    col.appendChild(header);
+
+    board[status].forEach(ticket => {
+      const card = createCard(ticket);
+      col.appendChild(card);
+    });
+
+    container.appendChild(col);
+  });
+}
+
+function createCard(ticket) {
+  const card = document.createElement('div');
+  card.className = `ticket-card ${ticket.priority}`;
+  card.dataset.ticketId = ticket.id;
+  card.draggable = true;
+
+  const priorityLabel = ticket.priority.charAt(0).toUpperCase() + ticket.priority.slice(1);
+  card.innerHTML = `
+    <div class="tkt-title">${escHtml(ticket.title)}</div>
+    <div class="tkt-meta">
+      <span class="tkt-id">${ticket.id}</span>
+      <span><span class="priority-badge ${ticket.priority}">${priorityLabel}</span> ${ticket.assignee ? escHtml(ticket.assignee) : '-'}</span>
+    </div>
+  `;
+
+  card.ondragstart = (e) => {
+    e.dataTransfer.setData('text/plain', ticket.id);
+    card.style.opacity = '0.4';
+  };
+  card.ondragend = () => { card.style.opacity = '1'; };
+
+  card.onclick = () => openDetailModal(ticket.id);
+
+  return card;
+}
+
+// ======== 拖拽支持 ========
+document.addEventListener('dragstart', (e) => {
+  if (e.target.closest('.kanban-col')) {
+    // column-level drag events handled per-card
+  }
+});
+
+document.querySelectorAll('.kanban-col').forEach(col => {
+  col.addEventListener('dragover', (e) => { e.preventDefault(); col.style.background = '#eef2ff'; });
+  col.addEventListener('dragleave', () => { col.style.background = ''; });
+  col.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    col.style.background = '';
+    const ticketId = e.dataTransfer.getData('text/plain');
+    const newStatus = col.dataset.status;
+    if (!ticketId || !newStatus) return;
+    try {
+      const r = await fetch(`/api/tickets/${ticketId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      if (r.ok) {
+        showToast(`工单 ${ticketId} 已移至 ${STATUS_LABELS[newStatus]}`);
+        await loadTickets();
+      } else {
+        showToast('更新失败');
+      }
+    } catch (err) {
+      showToast('网络错误');
+    }
+  });
+});
+
+// ======== 筛选 ========
+function filterTickets() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const status = document.getElementById('statusFilter').value;
+  const priority = document.getElementById('priorityFilter').value;
+
+  const filtered = allTickets.filter(t => {
+    if (search && !t.title.toLowerCase().includes(search) && !t.description.toLowerCase().includes(search)) return false;
+    if (status && t.status !== status) return false;
+    if (priority && t.priority !== priority) return false;
+    return true;
+  });
+
+  // 临时替换 allTickets 只用于看板渲染
+  const saved = allTickets;
+  allTickets = filtered;
+  renderBoard();
+  allTickets = saved;
+}
+
+// ======== 图表渲染 ========
+function renderCharts() {
+  const statusCounts = {};
+  const priorityCounts = {};
+  const assigneeCounts = {};
+
+  allTickets.forEach(t => {
+    statusCounts[t.status] = (statusCounts[t.status] || 0) + 1;
+    priorityCounts[t.priority] = (priorityCounts[t.priority] || 0) + 1;
+    const who = t.assignee || '未指派';
+    assigneeCounts[who] = (assigneeCounts[who] || 0) + 1;
+  });
+
+  // 状态图
+  const ctx1 = document.getElementById('statusChart').getContext('2d');
+  if (statusChartInstance) statusChartInstance.destroy();
+  statusChartInstance = new Chart(ctx1, {
+    type: 'doughnut',
+    data: {
+      labels: STATUS_ORDER.map(s => STATUS_LABELS[s]),
+      datasets: [{
+        data: STATUS_ORDER.map(s => statusCounts[s] || 0),
+        backgroundColor: STATUS_ORDER.map(s => COLORS[s]),
+      }]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  });
+
+  // 优先级图
+  const ctx2 = document.getElementById('priorityChart').getContext('2d');
+  if (priorityChartInstance) priorityChartInstance.destroy();
+  priorityChartInstance = new Chart(ctx2, {
+    type: 'bar',
+    data: {
+      labels: PRIORITY_ORDER.map(p => p.charAt(0).toUpperCase() + p.slice(1)),
+      datasets: [{
+        label: '数量',
+        data: PRIORITY_ORDER.map(p => priorityCounts[p] || 0),
+        backgroundColor: ['#ef4444', '#f97316', '#3b82f6', '#22c55e'],
+        borderRadius: 4,
+      }]
+    },
+    options: { responsive: true, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }, plugins: { legend: { display: false } } }
+  });
+
+  // 每人任务数
+  const sorted = Object.entries(assigneeCounts).sort((a, b) => b[1] - a[1]);
+  const ctx3 = document.getElementById('assigneeChart').getContext('2d');
+  if (assigneeChartInstance) assigneeChartInstance.destroy();
+  assigneeChartInstance = new Chart(ctx3, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(p => p[0]),
+      datasets: [{
+        label: '任务数',
+        data: sorted.map(p => p[1]),
+        backgroundColor: '#4f46e5',
+        borderRadius: 4,
+      }]
+    },
+    options: { responsive: true, indexAxis: 'y', scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } }, plugins: { legend: { display: false } } }
+  });
+}
+
+// ======== 新建工单 ========
+function openCreateModal() {
+  document.getElementById('createModal').classList.add('active');
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('active');
+}
+
+async function createTicket() {
+  const title = document.getElementById('newTitle').value.trim();
+  if (!title) { showToast('请输入标题'); return; }
+
+  const payload = {
+    title,
+    description: document.getElementById('newDesc').value.trim(),
+    priority: document.getElementById('newPriority').value,
+    assignee: document.getElementById('newAssignee').value.trim(),
+    tags: document.getElementById('newTags').value.split(',').map(t => t.trim()).filter(Boolean),
+    due_date: document.getElementById('newDueDate').value,
+    estimated_hours: parseFloat(document.getElementById('newHours').value) || null,
+  };
+
+  try {
+    const r = await fetch('/api/tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (r.ok) {
+      showToast('工单创建成功');
+      closeModal('createModal');
+      document.getElementById('newTitle').value = '';
+      document.getElementById('newDesc').value = '';
+      document.getElementById('newAssignee').value = '';
+      document.getElementById('newTags').value = '';
+      document.getElementById('newDueDate').value = '';
+      document.getElementById('newHours').value = '';
+      await loadTickets();
+    } else {
+      const err = await r.json();
+      showToast('创建失败: ' + (err.error || ''));
+    }
+  } catch (e) {
+    showToast('网络错误');
+  }
+}
+
+// ======== 工单详情 ========
+async function openDetailModal(ticketId) {
+  try {
+    const r = await fetch(`/api/tickets/${ticketId}`);
+    if (!r.ok) { showToast('加载失败'); return; }
+    const t = await r.json();
+
+    const content = document.getElementById('detailContent');
+    const priColor = t.priority;
+    content.innerHTML = `
+      <div class="detail-section"><label>ID</label><div class="value">${t.id}</div></div>
+      <div class="detail-section"><label>标题</label><div class="value">${escHtml(t.title)}</div></div>
+      <div class="detail-section"><label>描述</label><div class="value">${escHtml(t.description) || '(无描述)'}</div></div>
+      <div class="detail-section"><label>状态</label><div class="value">${STATUS_LABELS[t.status] || t.status}</div></div>
+      <div class="detail-section"><label>优先级</label><div class="value"><span class="priority-badge ${t.priority}">${t.priority}</span></div></div>
+      <div class="detail-section"><label>负责人</label><div class="value">${escHtml(t.assignee) || '未指派'}</div></div>
+      <div class="detail-section"><label>创建人</label><div class="value">${escHtml(t.creator) || '匿名'}</div></div>
+      <div class="detail-section"><label>创建时间</label><div class="value">${t.created_at}</div></div>
+      <div class="detail-section"><label>更新时间</label><div class="value">${t.updated_at}</div></div>
+      ${t.tags && t.tags.length ? `<div class="detail-section"><label>标签</label><div class="value">${t.tags.join(', ')}</div></div>` : ''}
+      ${t.due_date ? `<div class="detail-section"><label>截止日期</label><div class="value">${t.due_date}</div></div>` : ''}
+      ${t.estimated_hours ? `<div class="detail-section"><label>预估工时</label><div class="value">${t.estimated_hours}h</div></div>` : ''}
+      <div class="detail-section"><label>评论 (${(t.comments || []).length})</label></div>
+      <div id="commentList">
+        ${(t.comments || []).map(c => `
+          <div class="comment-item">
+            <div class="meta">${c.author} — ${c.created_at}</div>
+            <div class="body">${escHtml(c.message)}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div style="margin-top:10px; display:flex; gap:6px;">
+        <input id="commentInput" placeholder="输入评论..." style="flex:1; padding:6px 10px; border:1px solid var(--border); border-radius:6px;">
+        <button class="btn btn-primary btn-sm" onclick="addComment('${t.id}')">发送</button>
+      </div>
+      <div style="margin-top:8px;">
+        <label>指派给</label>
+        <div style="display:flex; gap:6px; margin-top:4px;">
+          <input id="assignInput" placeholder="负责人姓名" value="${escHtml(t.assignee)}" style="flex:1; padding:6px 10px; border:1px solid var(--border); border-radius:6px;">
+          <button class="btn btn-sm btn-success" onclick="assignTicket('${t.id}')">指派</button>
+        </div>
+      </div>
+      <div style="margin-top:8px;">
+        <label>更新状态</label>
+        <div style="display:flex; gap:6px; margin-top:4px;">
+          <select id="statusSelect" style="flex:1; padding:6px 10px; border:1px solid var(--border); border-radius:6px;">
+            ${['open','in_progress','review','done','closed'].map(s =>
+              `<option value="${s}" ${s === t.status ? 'selected' : ''}>${STATUS_LABELS[s]}</option>`
+            ).join('')}
+          </select>
+          <button class="btn btn-sm btn-primary" onclick="updateStatus('${t.id}')">更新</button>
+        </div>
+      </div>
+    `;
+    document.getElementById('detailTitle').textContent = `工单详情 — ${t.id}`;
+    document.getElementById('detailModal').classList.add('active');
+  } catch (e) {
+    showToast('加载失败');
+  }
+}
+
+async function addComment(ticketId) {
+  const msg = document.getElementById('commentInput').value.trim();
+  if (!msg) return;
+  try {
+    await fetch(`/api/tickets/${ticketId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, author: 'Web 用户' }),
+    });
+    document.getElementById('commentInput').value = '';
+    openDetailModal(ticketId);
+  } catch (e) { showToast('评论失败'); }
+}
+
+async function assignTicket(ticketId) {
+  const assignee = document.getElementById('assignInput').value.trim();
+  if (!assignee) return;
+  try {
+    await fetch(`/api/tickets/${ticketId}/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignee }),
+    });
+    showToast(`已指派给 ${assignee}`);
+    openDetailModal(ticketId);
+    await loadTickets();
+  } catch (e) { showToast('指派失败'); }
+}
+
+async function updateStatus(ticketId) {
+  const status = document.getElementById('statusSelect').value;
+  try {
+    await fetch(`/api/tickets/${ticketId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    showToast(`状态已更新为 ${STATUS_LABELS[status]}`);
+    openDetailModal(ticketId);
+    await loadTickets();
+  } catch (e) { showToast('更新失败'); }
+}
+
+// ======== Tab 切换 ========
+function showTab(tab) {
+  document.getElementById('kanbanView').style.display = tab === 'kanban' ? 'block' : 'none';
+  document.getElementById('chartsView').style.display = tab === 'charts' ? 'block' : 'none';
+  if (tab === 'charts') setTimeout(renderCharts, 100);
+}
+
+// ======== 工具函数 ========
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.classList.contains('modal-overlay')) e.target.classList.remove('active');
+});
+
+// ======== 启动 ========
+loadTickets();
+</script>
+</body>
+</html>
